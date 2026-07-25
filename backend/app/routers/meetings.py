@@ -28,6 +28,7 @@ from fastapi import (
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .. import asr
+from ..config import settings
 from ..database import get_db
 from ..deps import get_meeting_for_token
 from ..models import Meeting, MeetingAgendaItem, MeetingParticipant, MeetingStatus, MeetingTranscriptSegment
@@ -134,11 +135,21 @@ async def upload_audio_chunk(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Ses parçası çok büyük.")
 
     # faster-whisper is blocking/CPU-bound — keep it off the event loop.
-    # Model loading (and its first-use Hugging Face download) can fail at
-    # runtime even when the package imported fine — surface that as a 503,
-    # same as "not installed", rather than a raw 500.
+    # Model loading (and its first-use Hugging Face download) can fail *or
+    # hang* at runtime even when the package imported fine — cap how long a
+    # request waits so a stuck load 503s instead of hanging forever (which
+    # would also stall the client's recording loop, since it awaits each
+    # chunk's upload before recording the next one).
     try:
-        text = await asyncio.to_thread(asr.transcribe, audio_bytes)
+        text = await asyncio.wait_for(
+            asyncio.to_thread(asr.transcribe, audio_bytes),
+            timeout=settings.asr_load_timeout_seconds,
+        )
+    except asyncio.TimeoutError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="ASR modeli hâlâ yükleniyor (ilk kullanımda biraz sürebilir) — birazdan tekrar deneyin.",
+        ) from exc
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

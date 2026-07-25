@@ -17,11 +17,18 @@ class Settings(BaseSettings):
 
     # ASR (Faz 1 — faster-whisper, Turkish, no diarization). Model weights
     # download from Hugging Face on first use unless pre-baked into the
-    # image. "int8" keeps CPU inference practical without a GPU.
-    asr_model_size: str = "small"
+    # image. "int8" keeps CPU inference practical without a GPU. "tiny" is
+    # the default so a free/memory-constrained host (e.g. Render's free
+    # tier, 512MB RAM) has a real chance of loading it — bump to "small"/
+    # "base" for better accuracy where more RAM is available.
+    asr_model_size: str = "tiny"
     asr_device: str = "cpu"
     asr_compute_type: str = "int8"
     asr_language: str = "tr"
+    # First model load (download + init) can be slow on a constrained host;
+    # cap how long one request waits for it so a stuck load 503s instead of
+    # hanging the request (and the client's recording loop) forever.
+    asr_load_timeout_seconds: int = 25
 
     @property
     def cors_origin_list(self) -> list[str]:
