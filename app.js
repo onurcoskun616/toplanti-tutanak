@@ -8,8 +8,11 @@ const API_BASE_KEY = "tutanak:apiBaseUrl";
 const CHUNK_MS = 6000; // record ~6s self-contained chunks, not one continuous stream
 const POLL_MS = 1500;
 
+// Default to the deployed Render backend so the published GitHub Pages site
+// works out of the box; "Ayarlar" still lets you point at localhost for
+// local development.
 function getApiBase() {
-  return localStorage.getItem(API_BASE_KEY) || "http://localhost:8000";
+  return localStorage.getItem(API_BASE_KEY) || "https://toplanti-tutanak-backend.onrender.com";
 }
 function setApiBase(url) {
   localStorage.setItem(API_BASE_KEY, url.replace(/\/$/, ""));
