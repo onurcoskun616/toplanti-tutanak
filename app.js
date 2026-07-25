@@ -396,6 +396,7 @@ function renderLineEdit(line, seg) {
 
 function enterLiveScreen() {
   document.getElementById("liveTitle").textContent = state.meetingMeta.title;
+  document.getElementById("asrWarning").hidden = true;
   renderAgendaStrip();
   renderSpeakerStrip();
   renderLedger();
@@ -505,10 +506,26 @@ async function recordingLoop(stream) {
         state.lastSegmentId = Math.max(state.lastSegmentId, seg.id);
         appendSegment(seg);
       }
-    } catch {
-      /* one bad chunk shouldn't stop the meeting — keep recording */
+      hideAsrWarning();
+    } catch (err) {
+      // One bad chunk shouldn't stop the meeting — keep recording — but make
+      // the failure visible instead of silently dropping every line, so a
+      // persistent ASR problem (e.g. the model failing to load on a memory-
+      // constrained host) is obvious rather than looking like "nothing is
+      // being heard".
+      console.error("audio-chunk upload failed:", err);
+      showAsrWarning(err.message || "Ses tanıma isteği başarısız oldu.");
     }
   }
+}
+
+function showAsrWarning(message) {
+  const el = document.getElementById("asrWarning");
+  el.textContent = `Ses tanıma çalışmıyor: ${message} (Kayıt devam ediyor, ama konuşmalar metne dönüşmüyor.)`;
+  el.hidden = false;
+}
+function hideAsrWarning() {
+  document.getElementById("asrWarning").hidden = true;
 }
 
 async function startRecording() {
