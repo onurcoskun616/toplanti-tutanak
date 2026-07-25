@@ -495,12 +495,15 @@ async function recordingLoop(stream) {
     let blob;
     try {
       blob = await recordOneChunk(stream);
-    } catch {
+    } catch (err) {
+      console.error("recording a chunk failed, stopping the loop:", err);
       break;
     }
+    console.log(`recorded chunk: ${blob.size} bytes, type=${blob.type}`);
     if (!state.recording) break;
     try {
       const seg = await api.uploadAudioChunk(state.meetingId, blob, state.activeSpeakerId);
+      console.log("audio-chunk response:", seg);
       if (seg && !state.segments.some((s) => s.id === seg.id)) {
         state.segments.push(seg);
         state.lastSegmentId = Math.max(state.lastSegmentId, seg.id);
