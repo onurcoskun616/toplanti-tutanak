@@ -31,6 +31,8 @@ const state = {
   pollTimer: null,
   mediaStream: null,
   meetingMeta: null, // hydrated final GET response
+  uploadQueue: [], // {blob, participantId} — drained one at a time, independent of recording
+  uploading: false,
 };
 
 /* ---------------------------------------------------------------------- *
@@ -490,6 +492,14 @@ function recordOneChunk(stream) {
   });
 }
 
+// Recording and uploading are intentionally decoupled: on a slow/CPU-
+// constrained backend a single chunk's transcription can take much longer
+// than the ~6s it took to record it. If recording waited for each upload to
+// finish before starting the next chunk, most of the meeting would simply
+// never be captured. So recording runs back-to-back on its own clock, and
+// finished chunks are queued and uploaded one at a time in the background
+// (one at a time, not all at once, so a slow host isn't hit with a pile of
+// concurrent transcription requests on top of the one it's already behind on).
 async function recordingLoop(stream) {
   while (state.recording) {
     let blob;
@@ -501,25 +511,49 @@ async function recordingLoop(stream) {
     }
     console.log(`recorded chunk: ${blob.size} bytes, type=${blob.type}`);
     if (!state.recording) break;
-    try {
-      const seg = await api.uploadAudioChunk(state.meetingId, blob, state.activeSpeakerId);
-      console.log("audio-chunk response:", seg);
-      if (seg && !state.segments.some((s) => s.id === seg.id)) {
-        state.segments.push(seg);
-        state.lastSegmentId = Math.max(state.lastSegmentId, seg.id);
-        appendSegment(seg);
-      }
-      hideAsrWarning();
-    } catch (err) {
-      // One bad chunk shouldn't stop the meeting — keep recording — but make
-      // the failure visible instead of silently dropping every line, so a
-      // persistent ASR problem (e.g. the model failing to load on a memory-
-      // constrained host) is obvious rather than looking like "nothing is
-      // being heard".
-      console.error("audio-chunk upload failed:", err);
-      showAsrWarning(err.message || "Ses tanıma isteği başarısız oldu.");
-    }
+    state.uploadQueue.push({ blob, participantId: state.activeSpeakerId });
+    processUploadQueue();
   }
+}
+
+async function processUploadQueue() {
+  if (state.uploading) return;
+  const next = state.uploadQueue.shift();
+  if (!next) return;
+  state.uploading = true;
+  try {
+    const seg = await api.uploadAudioChunk(state.meetingId, next.blob, next.participantId);
+    console.log("audio-chunk response:", seg);
+    if (seg && !state.segments.some((s) => s.id === seg.id)) {
+      state.segments.push(seg);
+      state.lastSegmentId = Math.max(state.lastSegmentId, seg.id);
+      appendSegment(seg);
+    }
+    hideAsrWarning();
+  } catch (err) {
+    // One bad/slow chunk shouldn't stop the meeting — keep recording — but
+    // make the failure visible instead of silently dropping every line, so
+    // a persistent ASR problem (e.g. the model struggling on a constrained
+    // host) is obvious rather than looking like "nothing is being heard".
+    console.error("audio-chunk upload failed:", err);
+    showAsrWarning(err.message || "Ses tanıma isteği başarısız oldu.");
+  } finally {
+    state.uploading = false;
+    processUploadQueue(); // drain the rest of the queue, if any piled up
+  }
+}
+
+// Used when ending the meeting: wait for any chunks still queued/in-flight
+// to finish uploading before calling the end endpoint (which 409s once the
+// meeting is no longer "live").
+function waitForUploadQueueToDrain() {
+  return new Promise((resolve) => {
+    const check = () => {
+      if (!state.uploading && state.uploadQueue.length === 0) resolve();
+      else setTimeout(check, 300);
+    };
+    check();
+  });
 }
 
 function showAsrWarning(message) {
@@ -560,8 +594,12 @@ function stopRecording() {
 document.getElementById("endBtn").addEventListener("click", async () => {
   const btn = document.getElementById("endBtn");
   btn.disabled = true;
+  stopRecording(); // no new chunks — but let already-queued ones finish uploading
+  if (state.uploading || state.uploadQueue.length > 0) {
+    btn.textContent = "Kalan parçalar işleniyor…";
+    await waitForUploadQueueToDrain(); // polling (below) keeps showing them as they arrive
+  }
   btn.textContent = "Bitiriliyor…";
-  stopRecording();
   stopPolling();
   stopRecTimer();
   try {

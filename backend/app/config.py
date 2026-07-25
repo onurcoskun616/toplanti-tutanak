@@ -25,10 +25,11 @@ class Settings(BaseSettings):
     asr_device: str = "cpu"
     asr_compute_type: str = "int8"
     asr_language: str = "tr"
-    # First model load (download + init) can be slow on a constrained host;
-    # cap how long one request waits for it so a stuck load 503s instead of
-    # hanging the request (and the client's recording loop) forever.
-    asr_load_timeout_seconds: int = 45
+    # Both the first model load (download + init) AND per-chunk inference
+    # can be slow on a CPU-constrained host (observed: a 6s chunk taking
+    # 45s+ to transcribe on Render's free tier) — cap how long one request
+    # waits so a stuck/too-slow attempt 503s instead of hanging forever.
+    asr_request_timeout_seconds: int = 120
 
     @property
     def cors_origin_list(self) -> list[str]:

@@ -143,12 +143,12 @@ async def upload_audio_chunk(
     try:
         text = await asyncio.wait_for(
             asyncio.to_thread(asr.transcribe, audio_bytes),
-            timeout=settings.asr_load_timeout_seconds,
+            timeout=settings.asr_request_timeout_seconds,
         )
     except asyncio.TimeoutError as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="ASR modeli hâlâ yükleniyor (ilk kullanımda biraz sürebilir) — birazdan tekrar deneyin.",
+            detail="ASR bu sunucuda çok yavaş kaldı (model yükleniyor olabilir ya da CPU yetersiz) — birazdan tekrar deneyin.",
         ) from exc
     except Exception as exc:
         raise HTTPException(
