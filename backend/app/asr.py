@@ -6,11 +6,14 @@ chunk into text. The optional ``faster_whisper`` import is guarded: if the
 package (or its model weights) isn't available, the app still boots — ASR
 just stays disabled and the audio-chunk endpoint answers 503.
 """
+import logging
 import os
 import tempfile
 import threading
 
 from .config import settings
+
+logger = logging.getLogger("tutanak.asr")
 
 try:
     from faster_whisper import WhisperModel
@@ -65,8 +68,17 @@ def transcribe(audio_bytes: bytes) -> str:
         with os.fdopen(fd, "wb") as f:
             f.write(audio_bytes)
         model = _get_model()
-        segments, _info = model.transcribe(path, language=settings.asr_language)
-        return " ".join(seg.text.strip() for seg in segments).strip()
+        segments, info = model.transcribe(path, language=settings.asr_language)
+        text = " ".join(seg.text.strip() for seg in segments).strip()
+        logger.info(
+            "transcribed %d bytes -> duration=%.2fs lang=%s(p=%.2f) text=%r",
+            len(audio_bytes),
+            info.duration,
+            info.language,
+            info.language_probability,
+            text,
+        )
+        return text
     finally:
         try:
             os.remove(path)
