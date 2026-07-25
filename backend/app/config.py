@@ -28,7 +28,7 @@ class Settings(BaseSettings):
     # First model load (download + init) can be slow on a constrained host;
     # cap how long one request waits for it so a stuck load 503s instead of
     # hanging the request (and the client's recording loop) forever.
-    asr_load_timeout_seconds: int = 25
+    asr_load_timeout_seconds: int = 45
 
     @property
     def cors_origin_list(self) -> list[str]:

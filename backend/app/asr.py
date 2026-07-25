@@ -8,6 +8,7 @@ just stays disabled and the audio-chunk endpoint answers 503.
 """
 import os
 import tempfile
+import threading
 
 from .config import settings
 
@@ -24,16 +25,27 @@ def asr_available() -> bool:
 
 
 _model = None
+# Concurrent chunk uploads land on different worker threads (see
+# asyncio.to_thread in routers/meetings.py). Without this lock, each one
+# that finds `_model` still None would kick off its own WhisperModel(...)
+# construction (download + init) in parallel — competing for the same
+# limited CPU/RAM/network on a constrained host and making a slow first
+# load even slower. The lock makes only one thread do the real work; the
+# rest block on it (and may still 503 on the per-request timeout upstream,
+# but won't each start a redundant load).
+_model_lock = threading.Lock()
 
 
 def _get_model():
     global _model
     if _model is None:
-        _model = WhisperModel(
-            settings.asr_model_size,
-            device=settings.asr_device,
-            compute_type=settings.asr_compute_type,
-        )
+        with _model_lock:
+            if _model is None:  # re-check: another thread may have finished first
+                _model = WhisperModel(
+                    settings.asr_model_size,
+                    device=settings.asr_device,
+                    compute_type=settings.asr_compute_type,
+                )
     return _model
 
 
